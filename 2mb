@@ -1,0 +1,61 @@
+%define PAGE_TABLE_BASE_ADDRESS 0x0000                		  ;segment number         
+%define PAGE_TABLE_BASE_OFFSET 0x1000                   			  ;starting address
+%define PAGE_TABLE_EFFECTIVE_ADDRESS 0x1000          	             ;absolute address from beginning of the memory 
+%define PAGE_PRESENT_WRITE 0x3  ; 011b                                             ;read/write value   
+%define MEM_PAGE_4K         0x1000                 			            ;size constant
+
+build_page_table:
+    
+pusha                                  ;an assembler macro which stores a copy of the variables included in the general purpose registers that are currently loaded
+                                            ;acts like a snapshot so that we do not lose any data by accident in the process
+
+
+   ;[es:di] points to the first page table entry of the first level page table (0x0000:0x1000)
+   
+   mov ax,PAGE_TABLE_BASE_ADDRESS
+   mov es,ax                              					  ;es points to the segment number
+   xor eax,eax                             					  ;XORing the register with itself is the faster, more efficient way to zero it out rather than using the mov instruction
+   mov edi,PAGE_TABLE_BASE_OFFSET                                ;di points to the offset
+   mov ecx,0x1000                           				  ;similar to a loop counter = 4096
+   xor eax,eax                           				             ;XORing the register with itself is the faster, more efficient way to zero it out rather than using the mov instruction
+   cld                               				                        ;reseting the direction so that we are sure the entries are not being read incorrectly, decrements ecx until it equals 0
+   rep stosd                                                                                  ;CISC instruction which goes to the location stored in es:di and stores there the value of the register eax and increments di by 4
+                                     					             ;combining it with the rep instruction will repeat the execution 4096 times (0x1000 that is stored in ecx)
+
+   ;therefore, the previous code zeroes out all page entries for a number of times until ecx = 0
+   ;this initializes 4 memory pages (to be used for the 4 levels of page tables)
+
+
+   mov edi,PAGE_TABLE_BASE_OFFSET      					    ;di contains the offset 0x1000 and es already equals 0, meaning that [es:di] is pointing to the first entry of PML4
+   lea eax, [es:di+MEM_PAGE_4K]            					    ;load effective address applies the conversion formula to generate the linear address 
+                                          							               ;this instance will store the address of the next memory page/page level which is PDP into eax.
+   or eax,PAGE_PRESENT_WRITE           				               ;oring the value in eax with 3 will set bit 0 and bit 1 both to 1, which means the page entry is both readable and writeable, regardless of what the value inside eax is
+   mov [es:di],eax                        							    ;this makes the value of [es:di] equivalent to the hexadecimal value 2003 and stores the said value in the first entry of PML4 so that it now points to PDP.
+   
+   add di,MEM_PAGE_4K                     					              ;adding 4K fo the present address value so that it es:di now points at the next page table level (PDP) 
+   lea eax, [es:di+MEM_PAGE_4K]            					   ;load effective address applies the conversion formula to generate the linear address 
+                                                                                                                          ;this instance will store the address of the next memory page/page level which is PD, into eax.   
+   or eax,PAGE_PRESENT_WRITE              				              ;oring the value in eax with 3 will set bit 0 and bit 1 both to 1, which means the page entry is both readable and writeable, regardless of what the value inside eax is
+   mov [es:di],eax                    					                         ;this makes the value of [es:di] equivalent to the hexadecimal value 3003 and stores the said value in the first entry of PDP so that it now points to PD.
+   
+
+
+   add di,MEM_PAGE_4K							             ;adding 4K fo the present address value so that it es:di now points at the next page table level (PD) 
+   lea eax, [es:di+MEM_PAGE_4K]						  ;load effective address applies the conversion formula to generate the linear address   
+										             ;this instance will store the address of the next memory page/page level which is PTE into eax.
+   or eax,PAGE_PRESENT_WRITE					             ;oring the value in eax with 3 will set bit 0 and bit 1 both to 1, which means the page entry is both readable and writeable, regardless of what the value inside eax is.
+   mov [es:di],eax									  ;this makes the value of [es:di] equivalent to the hexadecimal value 3003
+  											
+   add di,MEM_PAGE_4K								  ;adding 4K fo the present address value so that it es:di now points at the PTE
+   mov eax,PAGE_PRESENT_WRITE					             ;eax contains 3=page read and write value					
+
+   .pte_loop:           									  ;fill the first 512 entries = 2 MB of memory of the page table 
+   mov [es:di],eax									  ;makes the value of [es:di] equivalent to 3
+   add eax,MEM_PAGE_4K							  ;adds the address to the read/write value 
+   add di,0x8										  ;increment by 8 since each entry is equivalent to 8 bytes
+   cmp eax,0x200000 							             ;check if we have reached the end of the first 2 MBs
+   jl.pte_loop										  ;if less than 2MB, loop again
+
+    popa                         						                       ;an assembler macro which reloads the general purpose registers with their correct values/variables/etc. just in case anything was altered
+											 ;this instruction along with the first one is simply good practice and is recommended to be implemented at the beginning and end of every function
+    ret											 ;returns to the instruction following the function call in the main program
